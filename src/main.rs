@@ -1,8 +1,10 @@
 use color_eyre::Result;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEvent};
 
-use std::sync::mpsc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use rand::random_bool;
+use std::time::{Duration, Instant};
 
 mod tui;
 
@@ -124,17 +126,102 @@ fn process_physics(old_sandbox: &Vec<Vec<u8>>) -> Vec<Vec<u8>> {
     return sandbox;
 }
 
+
+pub enum Update {
+    Exit(),
+    Sandbox(Vec<Vec<u8>>)
+}
+
+pub enum Input {
+    Key(KeyEvent),
+    Mouse(MouseEvent),
+    Resize(u16, u16),
+}
+
+struct Simulation {
+    update_sender: Sender<Update>,
+    input_receiver: Receiver<Input>,
+    sandbox: Vec<Vec<u8>>,
+    faucet_pos: usize,
+    faucet_pouring: bool
+}
+
+impl Simulation {
+
+    fn new(update_sender: Sender<Update>, input_receiver: Receiver<Input>, width: usize, height: usize) -> Simulation {
+        Simulation {
+            update_sender,
+            input_receiver,
+            sandbox: vec![vec![0; (height - 2) * 4]; (width - 2) * 2],
+            faucet_pos: 0,
+            faucet_pouring: false,
+        }
+    }
+
+    fn run_sandbox_thread(&mut self) {
+        let frame_time = Duration::from_millis(8);
+        loop {
+            let start_time = Instant::now();
+            if self.faucet_pouring { self.sandbox[self.faucet_pos][0] = 1; }
+            self.sandbox = process_physics(&self.sandbox);
+            self.update_sender.send(Update::Sandbox(self.sandbox.clone())).expect("could not send sandbox update along mpsc channel");
+            self.handle_input();
+            let elapsed_time = start_time.elapsed();
+            let sleep_time = frame_time.checked_sub(elapsed_time).unwrap_or(Duration::ZERO);
+            thread::sleep(sleep_time);
+        }
+    }
+
+    fn handle_input(&mut self) {
+        match self.input_receiver.try_recv() {
+            Ok(Input::Key(key_event)) => self.handle_key_event(key_event),
+            Ok(Input::Mouse(mouse_event)) => self.handle_mouse_event(mouse_event),
+            Ok(Input::Resize(x, y)) => self.handle_resize_event(x, y),
+            Err(_) => {}
+        }
+    }
+
+    fn handle_key_event(&mut self, key_event: KeyEvent) {
+        match key_event.code {
+            KeyCode::Char('q') => self.update_sender.send(Update::Exit()).expect("could not send exit event along mpsc channel"),
+            KeyCode::Left => if self.faucet_pos > 0 { self.faucet_pos -= 1 },
+            KeyCode::Right => if self.faucet_pos < (self.sandbox.len() - 1) { self.faucet_pos += 1 },
+            KeyCode::Up => self.faucet_pouring ^= true,
+            _ => {}
+        }
+    }
+
+    fn handle_mouse_event(&mut self, mouse_event: MouseEvent) {
+        todo!();
+    }
+
+    fn handle_resize_event(&mut self, x: u16, y: u16) {
+        {}
+    }
+}
+
+fn handle_input_events(sender: Sender<Input>) {
+    loop {
+        match event::read().expect("could not read crossterm events") {
+            Event::Key(key_event) => sender.send(Input::Key(key_event)).expect("could not send key event along inputs mpsc channel"),
+            Event::Mouse(mouse_event) => sender.send(Input::Mouse(mouse_event)).expect("could not send mouse event along inputs mpsc channel"),
+            Event::Resize(x, y) => sender.send(Input::Resize(x, y)).expect("could not send resize event along inputs mpsc channel"),
+            _ => {}
+        }
+    }
+}
+
 fn main() -> Result<()> {
-    let mut app = tui::App::new(vec![vec![0]]);
     
-    let (update_sender, update_reciever) = mpsc::channel::<tui::Update>();
-    let input_sender = update_sender.clone();
-    thread::spawn(move || {tui::send_input_events(input_sender);});
-    let sandbox_sender = update_sender.clone();
-    thread::spawn(move || {tui::run_sandbox_thread(sandbox_sender);});
+    let (update_sender, update_receiver) = mpsc::channel::<Update>();
+    let (input_sender, input_receiver) = mpsc::channel::<Input>();
+    let mut tui = tui::TUI::new(vec![vec![0]], update_receiver);
+    let mut sim = Simulation::new(update_sender, input_receiver, 80, 20);
+    thread::spawn(move || {sim.run_sandbox_thread();});
+    thread::spawn(move || handle_input_events(input_sender));
 
     let mut terminal = ratatui::init();
-    let result = app.run(&mut terminal, update_reciever);
+    let result = tui.run(&mut terminal);
     ratatui::restore();
     return result;
 }

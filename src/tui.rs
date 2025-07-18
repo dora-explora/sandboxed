@@ -1,63 +1,29 @@
-use color_eyre::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEvent};
+use color_eyre::{Result};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    text::{Line},
+    style::{Color, Stylize},
+    text::{Line, Text},
     widgets::{Block, BorderType, Paragraph, Widget},
     DefaultTerminal, Frame,
 };
 
-use std::thread;
-use std::time::{Duration, Instant};
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::Receiver;
 
-use crate::{sandbox_to_text, process_physics};
+use crate::{sandbox_to_text, Update};
 
-pub struct App {
+pub struct TUI {
     pub(crate) sandbox: Vec<Vec<u8>>,
+    pub(crate) receiver: Receiver<Update>,
     exit: bool,
 }
 
-pub enum Update {
-    Key(crossterm::event::KeyEvent),
-    Mouse(crossterm::event::MouseEvent),
-    Resize(u16, u16),
-    Sandbox(Vec<Vec<u8>>)
-}
+impl TUI {
 
-pub fn send_input_events(sender: Sender<Update>) {
-    loop {
-        match event::read().expect("Could not read crossterm events") {
-            Event::Key(key_event) => sender.send(Update::Key(key_event)).expect("could not send key event along mpsc channel"),
-            Event::Mouse(mouse_event) => sender.send(Update::Mouse(mouse_event)).expect("could not send mouse event along mpsc channel"),
-            Event::Resize(x, y) => sender.send(Update::Resize(x, y)).expect("could not send resize event along mpsc channel"),
-            _ => {}
-        }
-    }
-}
-
-pub fn run_sandbox_thread(sender: Sender<Update>) {
-    let width: usize = (80 - 2) * 2;
-    let height: usize = (20 - 2) * 4;
-    let mut sandbox: Vec<Vec<u8>> = vec![vec![0; height]; width];
-    let frame_time = Duration::from_millis(8);
-    loop {
-        let start_time = Instant::now();
-        sandbox[width/2][0]= 1;
-        sandbox = process_physics(&sandbox);
-        sender.send(Update::Sandbox(sandbox.clone())).expect("could not send sandbox update along mpsc channel");
-        let elapsed_time = start_time.elapsed();
-        let sleep_time = frame_time.checked_sub(elapsed_time).unwrap_or(Duration::ZERO);
-        thread::sleep(sleep_time);
-    }
-}
-
-impl App {
-
-    pub fn new(sandbox: Vec<Vec<u8>>) -> App {
-        return App { 
+    pub fn new(sandbox: Vec<Vec<u8>>, receiver: Receiver<Update>) -> TUI {
+        return TUI { 
             sandbox,
+            receiver,
             exit: false
         };
     }
@@ -66,16 +32,14 @@ impl App {
         self.exit = true;
     }
     
-    pub fn run(&mut self, terminal: &mut DefaultTerminal, reciever: Receiver<Update>) -> Result<()> {
+    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
 
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
 
             // handle updates
-            match reciever.recv().expect("could not recieve updates along mpsc channel") {
-                Update::Key(key_event) => self.handle_key_event(key_event),
-                Update::Mouse(mouse_event) => self.handle_mouse_event(mouse_event),
-                Update::Resize(x, y) => self.handle_resize_event(x, y),
+            match self.receiver.recv().expect("could not recieve updates along updates mpsc channel") {
+                Update::Exit() => self.exit(),
                 Update::Sandbox(sandbox) => self.sandbox = sandbox
             }
         }
@@ -85,32 +49,20 @@ impl App {
     fn draw(&self, frame: &mut Frame) {
         frame.render_widget(self, frame.area());
     }
-
-    fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match key_event.code {
-            KeyCode::Char('q') => self.exit(),
-            _ => {}
-        }
-    }
-
-    fn handle_mouse_event(&mut self, mouse_event: MouseEvent) {
-        {}
-    }
-
-    fn handle_resize_event(&mut self, x: u16, y: u16) {
-        {}
-    }
-
 }
 
-impl Widget for &App {
+impl Widget for &TUI {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let title = Line::from(" sandboxed ").centered();
+        let instructions = Line::from(" press 'q' to exit ").centered();
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .title(title);
+            .title(title)
+            .title_bottom(instructions);
 
-        Paragraph::new(sandbox_to_text(&self.sandbox))
+        let sandbox_text = Text::from(sandbox_to_text(&self.sandbox)).fg(Color::Yellow);
+
+        Paragraph::new(sandbox_text)
             .centered()
             .block(block)
             .render(area, buf);
