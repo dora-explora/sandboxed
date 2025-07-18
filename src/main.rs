@@ -80,7 +80,7 @@ fn sandbox_to_text(sandbox: &Vec<Vec<u8>>) -> String {
 // }
 
 fn check_left_gravity(sandbox: &mut Vec<Vec<u8>>, x: usize, y: usize) {
-    if x > 0 { // currently the pixel always falls left: this should be random
+    if x > 0 {
         if sandbox[x-1][y+1] == 0 {  
             sandbox[x-1][y+1] = sandbox[x][y];
             sandbox[x][y] = 0;

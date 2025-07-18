@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::sync::mpsc::{Sender, Receiver};
 
 use crate::{sandbox_to_text, process_physics};
@@ -38,12 +38,18 @@ pub fn send_input_events(sender: Sender<Update>) {
 }
 
 pub fn run_sandbox_thread(sender: Sender<Update>) {
-    let mut sandbox: Vec<Vec<u8>> = vec![vec![0; 80]; 196];
+    let width: usize = (80 - 2) * 2;
+    let height: usize = (20 - 2) * 4;
+    let mut sandbox: Vec<Vec<u8>> = vec![vec![0; height]; width];
+    let frame_time = Duration::from_millis(8);
     loop {
-        sandbox[20][0]= 1;
+        let start_time = Instant::now();
+        sandbox[width/2][0]= 1;
         sandbox = process_physics(&sandbox);
         sender.send(Update::Sandbox(sandbox.clone())).expect("could not send sandbox update along mpsc channel");
-        thread::sleep(Duration::from_millis(12));
+        let elapsed_time = start_time.elapsed();
+        let sleep_time = frame_time.checked_sub(elapsed_time).unwrap_or(Duration::ZERO);
+        thread::sleep(sleep_time);
     }
 }
 
