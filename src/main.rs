@@ -15,49 +15,6 @@ mod tui;
 //     }
 // }
 
-fn check_left_gravity(sandbox: &mut Vec<Vec<u8>>, x: usize, y: usize) {
-    if x > 0 {
-        if sandbox[x-1][y+1] == 0 {  
-            sandbox[x-1][y+1] = sandbox[x][y];
-            sandbox[x][y] = 0;
-        }
-    }
-}
-
-fn check_right_gravity(sandbox: &mut Vec<Vec<u8>>, x: usize, y: usize) {
-    if x < (sandbox.len() - 1) { 
-        if sandbox[x+1][y+1] == 0 {
-            sandbox[x+1][y+1] = sandbox[x][y];
-            sandbox[x][y] = 0;
-        }
-    }
-}
-
-fn process_gravity(sandbox: &mut Vec<Vec<u8>>) {
-    for y in (0..sandbox[0].len()).rev() {
-    for x in 0..sandbox.len() {
-        if sandbox[x][y] == 1 && y < (sandbox[0].len() - 1) {
-            if sandbox[x][y+1] == 0 {
-                sandbox[x][y+1] = sandbox[x][y];
-                sandbox[x][y] = 0;
-            }
-            if random_bool(0.5) {
-            // if true {
-                check_left_gravity(sandbox, x, y);
-                check_right_gravity(sandbox, x, y);
-            } else {
-                check_right_gravity(sandbox, x, y);
-                check_left_gravity(sandbox, x, y);
-            }
-        }
-    }
-    }
-}
-
-fn process_physics(sandbox: &mut Vec<Vec<u8>>) {
-    process_gravity(sandbox);
-}
-
 enum Input {
     Key(KeyEvent),
     Mouse(MouseEvent),
@@ -65,41 +22,42 @@ enum Input {
 }
 
 pub struct App {
-    pub(crate) sandbox: Vec<Vec<u8>>,
+    pub(crate) sandbox: Vec<Vec<usize>>,
     receiver: Receiver<Input>,
     faucet_pos: usize,
     faucet_pouring: bool,
-    last_frame_time: f64,
-    exit: bool,
+    faucet_color: usize,
+    quit: bool,
 }
 
 impl App {
 
     fn new(width: usize, height: usize, receiver: Receiver<Input>) -> App {
         return App { 
-            sandbox: vec![vec![0; (height - 2) * 4]; (width - 2) * 2],
+            sandbox: vec![vec![0; (height - 4) * 4]; (width - 2) * 2],
             receiver,
             faucet_pos: 0, 
             faucet_pouring: true,
-            last_frame_time: 0., 
-            exit: false
+            faucet_color: 1, 
+            quit: false
         };
     }
 
-    fn exit(&mut self) {
-        self.exit = true;
+    fn quit(&mut self) {
+        self.quit = true;
     }
     
     fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
-        const FRAME_TIME: Duration = Duration::from_millis(15);
-        while !self.exit {
+        const FRAME_TIME: Duration = Duration::from_millis(18);
+        while !self.quit {
             let start_time = Instant::now();
-            if self.faucet_pouring { self.sandbox[self.faucet_pos][0] = 1; }
-            process_physics(&mut self.sandbox);
+            if self.faucet_pouring { self.sandbox[self.faucet_pos][0] = self.faucet_color; }
+            else { self.sandbox[self.faucet_pos][0] = 0; }
+            self.process_physics();
             self.handle_input();
+            self.sandbox[self.faucet_pos][0] = self.faucet_color;
             terminal.draw(|frame| self.draw(frame))?;
             let elapsed_time = start_time.elapsed();
-            self.last_frame_time = elapsed_time.as_secs_f64();
             let sleep_time = FRAME_TIME.checked_sub(elapsed_time).unwrap_or(Duration::ZERO);
             thread::sleep(sleep_time);
         }
@@ -108,6 +66,49 @@ impl App {
 
     fn reset_sandbox(&mut self) {
         self.sandbox = vec![vec![0; self.sandbox[0].len()]; self.sandbox.len()];
+    }
+
+    fn process_physics(&mut self) {
+        self.process_gravity();
+    }
+
+    fn process_gravity(&mut self) {
+        for y in (0..self.sandbox[0].len()).rev() {
+        for x in 0..self.sandbox.len() {
+            if self.sandbox[x][y] > 0 && y < (self.sandbox[0].len() - 1) {
+                if self.sandbox[x][y+1] == 0 {
+                    self.sandbox[x][y+1] = self.sandbox[x][y];
+                    self.sandbox[x][y] = 0;
+                }
+                if random_bool(0.5) {
+                // if true {
+                    self.check_left_gravity(x, y);
+                    self.check_right_gravity(x, y);
+                } else {
+                    self.check_right_gravity(x, y);
+                    self.check_left_gravity(x, y);
+                }
+            }
+        }
+        }
+    }
+
+    fn check_left_gravity(&mut self, x: usize, y: usize) {
+        if x > 0 {
+            if self.sandbox[x-1][y+1] == 0 {  
+                self.sandbox[x-1][y+1] = self.sandbox[x][y];
+                self.sandbox[x][y] = 0;
+            }
+        }
+    }
+
+    fn check_right_gravity(&mut self, x: usize, y: usize) {
+        if x < (self.sandbox.len() - 1) { 
+            if self.sandbox[x+1][y+1] == 0 {
+                self.sandbox[x+1][y+1] = self.sandbox[x][y];
+                self.sandbox[x][y] = 0;
+            }
+        }
     }
 
     fn handle_input(&mut self) {
@@ -121,20 +122,21 @@ impl App {
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Char('q') => self.exit(),
+            KeyCode::Char('q') => self.quit(),
             KeyCode::Left => if self.faucet_pos > 0 { self.faucet_pos -= 1 },
             KeyCode::Right => if self.faucet_pos < (self.sandbox.len() - 1) { self.faucet_pos += 1 },
             KeyCode::Up => self.faucet_pouring ^= true,
             KeyCode::Down => self.reset_sandbox(),
+            KeyCode::Enter => self.switch_color(),
             _ => {}
         }
     }
 
-    fn handle_mouse_event(&mut self, mouse_event: MouseEvent) {
-        todo!();
+    fn handle_mouse_event(&mut self, _mouse_event: MouseEvent) {
+        {}
     }
 
-    fn handle_resize_event(&mut self, x: u16, y: u16) {
+    fn handle_resize_event(&mut self, _x: u16, _y: u16) {
         {}
     }
 }
@@ -153,7 +155,7 @@ fn handle_input_events(sender: Sender<Input>) {
 fn main() -> Result<()> {
     
     let (sender, receiver) = channel::<Input>();
-    let mut app = App::new(70, 20, receiver);
+    let mut app = App::new(130, 25, receiver);
     thread::spawn(move || handle_input_events(sender));
 
     let mut terminal = ratatui::init();

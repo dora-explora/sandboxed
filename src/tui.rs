@@ -1,11 +1,12 @@
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
-    style::{Style, Color, Stylize},
+    style::{Color, Style},
     text::{Line, Span, Text},
-    widgets::{Block, BorderType, Paragraph, Widget},
+    widgets::{Block, BorderType, Widget},
     Frame,
 };
+use counter::Counter;
 
 use crate::App;
 
@@ -28,47 +29,84 @@ const BLOCK_CHARS: [char; 256] = [ // THANK YOU SO MUCH https://wiki.ourworldoft
     '▄', '𜷛', '𜷜', '𜷝', '𜷞', '▙', '𜷟', '𜷠', '𜷡', '𜷢', '▟', '𜷣', '▆', '𜷤', '𜷥', '█'
 ];
 
-fn block_to_char(a: u8, b: u8, c: u8, d: u8, e: u8, f: u8, g: u8, h: u8) -> char {
+const PIXEL_COLORS: [Color; 4] = [Color::Yellow, Color::Blue, Color::Green, Color::Magenta];
+
+fn block_to_char(block: [usize; 8], reference: usize) -> char {
     let mut index = 0;
-    if a > 0 { 
+    if block[0] == reference { 
         index += 1;   }
-    if b > 0 { 
+    if block[1] == reference { 
         index += 2;   }
-    if c > 0 { 
+    if block[2] == reference { 
         index += 4;   }
-    if d > 0 { 
+    if block[3] == reference { 
         index += 8;   }
-    if e > 0 { 
+    if block[4] == reference { 
         index += 16;  }
-    if f > 0 { 
+    if block[5] == reference { 
         index += 32;  }
-    if g > 0 { 
+    if block[6] == reference { 
         index += 64;  }
-    if h > 0 { 
+    if block[7] == reference { 
         index += 128; }
     return BLOCK_CHARS[index]
 }
 
-fn sandbox_to_text(sandbox: &Vec<Vec<u8>>) -> Text {
+fn sandbox_to_text(sandbox: &Vec<Vec<usize>>) -> Text {
     let width = sandbox.len()/2;
     let height = sandbox[0].len()/4;
-    let mut lines: Vec<Line> = vec![Line::raw(""); height];
-    let mut spans: Vec<Vec<Span>> = Vec::new();
+    let mut spans: Vec<Vec<Span>> = vec![vec![]; height];
+    let mut block: [usize; 8] = [0; 8];
     for y in 0..height {
         for x in 0..width {
-            let a = sandbox[2*x    ][4*y + 0]; 
-            let b = sandbox[2*x + 1][4*y + 0]; 
-            let c = sandbox[2*x    ][4*y + 1]; 
-            let d = sandbox[2*x + 1][4*y + 1];
-            let e = sandbox[2*x    ][4*y + 2];
-            let f = sandbox[2*x + 1][4*y + 2]; 
-            let g = sandbox[2*x    ][4*y + 3]; 
-            let h = sandbox[2*x + 1][4*y + 3];
-            let span = block_to_char(a, b, c, d, e, f, g, h).to_string();
-            lines[y].push_span(span);
+            block[0] = sandbox[2*x    ][4*y + 0]; 
+            block[1] = sandbox[2*x + 1][4*y + 0]; 
+            block[2] = sandbox[2*x    ][4*y + 1];
+            block[3] = sandbox[2*x + 1][4*y + 1];
+            block[4] = sandbox[2*x    ][4*y + 2];
+            block[5] = sandbox[2*x + 1][4*y + 2]; 
+            block[6] = sandbox[2*x    ][4*y + 3]; 
+            block[7] = sandbox[2*x + 1][4*y + 3];
+            let mut style: Style = Style::new();
+            let mut reference: usize = PIXEL_COLORS.len() + 1;
+            let counts = block.iter().collect::<Counter<_>>().most_common_ordered();
+            if counts.len() == 1 && *counts[0].0 > 0 { 
+                style = style.fg(PIXEL_COLORS[counts[0].0 - 1]); 
+                reference = *counts[0].0;
+            } else if counts.len() == 2 { 
+                if *counts[0].0 == 0 { 
+                    style = style.fg(PIXEL_COLORS[counts[1].0 - 1]); 
+                    reference = *counts[1].0;
+                } else if *counts[1].0 == 0 { 
+                    style = style.fg(PIXEL_COLORS[counts[0].0 - 1]); 
+                    reference = *counts[0].0;
+                } else {
+                    style = style.bg(PIXEL_COLORS[counts[0].0 - 1]);
+                    style = style.fg(PIXEL_COLORS[counts[1].0 - 1]);
+                    reference = *counts[1].0;
+                }
+            } else if counts.len() > 2 {
+                if *counts[0].0 == 0 { 
+                    style = style.fg(PIXEL_COLORS[counts[1].0 - 1]);
+                    reference = *counts[1].0;
+                } else { 
+                    style = style.fg(PIXEL_COLORS[counts[0].0 - 1]);
+                    reference = *counts[0].0;
+                }
+            }
+            let span = Span::styled(block_to_char(block, reference).to_string(), style);
+            spans[y].push(span);
         }
     }
-    
+
+    let mut lines = vec![
+        Line::from("| use ← and → to move | press ↑ to toggle pouring | press ↓ to reset sandbox |").centered(),
+        Line::from("| press enter to change color | press 'q' to quit |").centered()
+        ];
+    for spanline in spans {
+        lines.push(Line::from(spanline));
+    }
+
     return Text {
         alignment: Some(Alignment::Center),
         style: Style::new(),
@@ -79,6 +117,11 @@ fn sandbox_to_text(sandbox: &Vec<Vec<u8>>) -> Text {
 
 
 impl App {
+    pub fn switch_color(&mut self) {
+        self.faucet_color += 1;
+        if self.faucet_color == 5 { self.faucet_color = 1; }
+    }
+
     pub fn draw(&self, frame: &mut Frame) {
         frame.render_widget(self, frame.area());
     }
@@ -87,14 +130,13 @@ impl App {
 impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let title = Line::from(" sandboxed ").centered();
-        // let instructions: Line<'_> = Line::from("| press 'q' to exit | use ← and → to move the faucet | press ↑ to stop pouring | press ↓ to reset sandbox |").centered();        let instructions: Line<'_> = Line::from("| press 'q' to exit | use ← and → to move the faucet | press ↑ to stop pouring | press ↓ to reset sandbox |").centered();
-        let instructions: Line<'_> = Line::from(format!("| {}ms |", self.last_frame_time * 1000.)).centered();
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
-            .title(title)
-            .title_bottom(instructions);
+            .title(title);
 
-        let sandbox_text = Text::from(sandbox_to_text(&self.sandbox)).fg(Color::Yellow);
+        let sandbox_text = Text::from(sandbox_to_text(&self.sandbox));
+
+        ratatui::widgets::
 
         Paragraph::new(sandbox_text)
             .centered()
