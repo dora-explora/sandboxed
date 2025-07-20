@@ -29,7 +29,7 @@ const BLOCK_CHARS: [char; 256] = [ // THANK YOU SO MUCH https://wiki.ourworldoft
     '▄', '𜷛', '𜷜', '𜷝', '𜷞', '▙', '𜷟', '𜷠', '𜷡', '𜷢', '▟', '𜷣', '▆', '𜷤', '𜷥', '█'
 ];
 
-const PIXEL_COLORS: [Color; 4] = [Color::Yellow, Color::Blue, Color::Green, Color::Magenta];
+const PIXEL_COLORS: [Color; 5] = [Color::Black, Color::Yellow, Color::Blue, Color::Green, Color::Magenta];
 
 fn block_to_char(block: [usize; 8], reference: usize) -> char {
     let mut index = 0;
@@ -68,33 +68,45 @@ fn sandbox_to_text(sandbox: &Vec<Vec<usize>>) -> Text {
             block[6] = sandbox[2*x    ][4*y + 3]; 
             block[7] = sandbox[2*x + 1][4*y + 3];
             let mut style: Style = Style::new();
-            let mut reference: usize = PIXEL_COLORS.len() + 1;
+            let mut foreground: usize = PIXEL_COLORS.len() + 1;
             let counts = block.iter().collect::<Counter<_>>().most_common_ordered();
             if counts.len() == 1 && *counts[0].0 > 0 { 
-                style = style.fg(PIXEL_COLORS[counts[0].0 - 1]); 
-                reference = *counts[0].0;
+                style = style.fg(PIXEL_COLORS[*counts[0].0]); 
+                foreground = *counts[0].0;
             } else if counts.len() == 2 { 
                 if *counts[0].0 == 0 { 
-                    style = style.fg(PIXEL_COLORS[counts[1].0 - 1]); 
-                    reference = *counts[1].0;
+                    style = style.fg(PIXEL_COLORS[*counts[1].0]); 
+                    foreground = *counts[1].0;
                 } else if *counts[1].0 == 0 { 
-                    style = style.fg(PIXEL_COLORS[counts[0].0 - 1]); 
-                    reference = *counts[0].0;
+                    style = style.fg(PIXEL_COLORS[*counts[0].0]); 
+                    foreground = *counts[0].0;
                 } else {
-                    style = style.bg(PIXEL_COLORS[counts[0].0 - 1]);
-                    style = style.fg(PIXEL_COLORS[counts[1].0 - 1]);
-                    reference = *counts[1].0;
+                    style = style.bg(PIXEL_COLORS[*counts[0].0]);
+                    style = style.fg(PIXEL_COLORS[*counts[1].0]);
+                    foreground = *counts[1].0;
                 }
             } else if counts.len() > 2 {
+                let background: usize;
                 if *counts[0].0 == 0 { 
-                    style = style.fg(PIXEL_COLORS[counts[1].0 - 1]);
-                    reference = *counts[1].0;
+                    style = style.fg(PIXEL_COLORS[*counts[1].0]);
+                    foreground = *counts[1].0;
+                    background = *counts[2].0;
                 } else { 
-                    style = style.fg(PIXEL_COLORS[counts[0].0 - 1]);
-                    reference = *counts[0].0;
+                    style = style.fg(PIXEL_COLORS[*counts[0].0]);
+                    foreground = *counts[0].0;
+                    if *counts[1].0 != 0 && *counts[2].0 != 0 { 
+                        background = *counts[1].0; 
+                        style = style.bg(PIXEL_COLORS[background]);
+                    }
+                    else { background = 0; }
+                }
+                for i in 0..8 {
+                    if block[i] != 0 && block[i] != foreground && block[i] != background {
+                        block[i] = foreground
+                    }     
                 }
             }
-            let span = Span::styled(block_to_char(block, reference).to_string(), style);
+            let span = Span::styled(block_to_char(block, foreground).to_string(), style);
             spans[y].push(span);
         }
     }

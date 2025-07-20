@@ -1,5 +1,6 @@
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEvent};
+use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use ratatui::layout::Size;
 use ratatui::DefaultTerminal;
 
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -15,15 +16,9 @@ mod tui;
 //     }
 // }
 
-enum Input {
-    Key(KeyEvent),
-    Mouse(MouseEvent),
-    Resize(u16, u16),
-}
-
 pub struct App {
     pub(crate) sandbox: Vec<Vec<usize>>,
-    receiver: Receiver<Input>,
+    receiver: Receiver<KeyEvent>,
     faucet_pos: usize,
     faucet_pouring: bool,
     faucet_color: usize,
@@ -32,9 +27,9 @@ pub struct App {
 
 impl App {
 
-    fn new(width: usize, height: usize, receiver: Receiver<Input>) -> App {
+    fn new(width: u16, height: u16, receiver: Receiver<KeyEvent>) -> App {
         return App { 
-            sandbox: vec![vec![0; (height - 4) * 4]; (width - 2) * 2],
+            sandbox: vec![vec![0; (height as usize - 4) * 4]; (width as usize - 2) * 2],
             receiver,
             faucet_pos: 0, 
             faucet_pouring: true,
@@ -113,9 +108,7 @@ impl App {
 
     fn handle_input(&mut self) {
         match self.receiver.try_recv() {
-            Ok(Input::Key(key_event)) => self.handle_key_event(key_event),
-            Ok(Input::Mouse(mouse_event)) => self.handle_mouse_event(mouse_event),
-            Ok(Input::Resize(x, y)) => self.handle_resize_event(x, y),
+            Ok(key_event) => self.handle_key_event(key_event),
             Err(_) => {}
         }
     }
@@ -131,22 +124,12 @@ impl App {
             _ => {}
         }
     }
-
-    fn handle_mouse_event(&mut self, _mouse_event: MouseEvent) {
-        {}
-    }
-
-    fn handle_resize_event(&mut self, _x: u16, _y: u16) {
-        {}
-    }
 }
 
-fn handle_input_events(sender: Sender<Input>) {
+fn send_input_events(sender: Sender<KeyEvent>) {
     loop {
         match event::read().expect("could not read crossterm events") {
-            Event::Key(key_event) => sender.send(Input::Key(key_event)).expect("could not send key event along inputs mpsc channel"),
-            Event::Mouse(mouse_event) => sender.send(Input::Mouse(mouse_event)).expect("could not send mouse event along inputs mpsc channel"),
-            Event::Resize(x, y) => sender.send(Input::Resize(x, y)).expect("could not send resize event along inputs mpsc channel"),
+            Event::Key(key_event) => sender.send(key_event).expect("could not send key event along inputs mpsc channel"),
             _ => {}
         }
     }
@@ -154,11 +137,16 @@ fn handle_input_events(sender: Sender<Input>) {
 
 fn main() -> Result<()> {
     
-    let (sender, receiver) = channel::<Input>();
-    let mut app = App::new(130, 25, receiver);
-    thread::spawn(move || handle_input_events(sender));
+
 
     let mut terminal = ratatui::init();
+    let size = match terminal.size() {
+        Ok(size) => size,
+        Err(_) => Size::new(80, 25)
+    };
+    let (sender, receiver) = channel::<KeyEvent>();
+    let mut app = App::new(size.width, size.height, receiver);
+    thread::spawn(move || send_input_events(sender));
     let result = app.run(&mut terminal);
     ratatui::restore();
     return result;
