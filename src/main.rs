@@ -16,8 +16,8 @@ mod tui;
 //     }
 // }
 
-pub struct App {
-    pub(crate) sandbox: Vec<Vec<usize>>,
+struct App {
+    sandbox: Vec<Vec<usize>>,
     receiver: Receiver<KeyEvent>,
     faucet_pos: usize,
     faucet_pouring: bool,
@@ -29,7 +29,7 @@ impl App {
 
     fn new(width: u16, height: u16, receiver: Receiver<KeyEvent>) -> App {
         return App { 
-            sandbox: vec![vec![0; (height as usize - 4) * 4]; (width as usize - 2) * 2],
+            sandbox: vec![vec![0; (height as usize - 5) * 4]; (width as usize - 2) * 2],
             receiver,
             faucet_pos: 0, 
             faucet_pouring: true,
@@ -46,12 +46,10 @@ impl App {
         const FRAME_TIME: Duration = Duration::from_millis(18);
         while !self.quit {
             let start_time = Instant::now();
+            terminal.draw(|frame| self.draw(frame))?;
             if self.faucet_pouring { self.sandbox[self.faucet_pos][0] = self.faucet_color; }
-            else { self.sandbox[self.faucet_pos][0] = 0; }
             self.process_physics();
             self.handle_input();
-            self.sandbox[self.faucet_pos][0] = self.faucet_color;
-            terminal.draw(|frame| self.draw(frame))?;
             let elapsed_time = start_time.elapsed();
             let sleep_time = FRAME_TIME.checked_sub(elapsed_time).unwrap_or(Duration::ZERO);
             thread::sleep(sleep_time);
@@ -119,7 +117,7 @@ impl App {
             KeyCode::Left => if self.faucet_pos > 0 { self.faucet_pos -= 1 },
             KeyCode::Right => if self.faucet_pos < (self.sandbox.len() - 1) { self.faucet_pos += 1 },
             KeyCode::Up => self.faucet_pouring ^= true,
-            KeyCode::Down => self.reset_sandbox(),
+            KeyCode::Char('r') => self.reset_sandbox(),
             KeyCode::Enter => self.switch_color(),
             _ => {}
         }
@@ -136,9 +134,6 @@ fn send_input_events(sender: Sender<KeyEvent>) {
 }
 
 fn main() -> Result<()> {
-    
-
-
     let mut terminal = ratatui::init();
     let size = match terminal.size() {
         Ok(size) => size,
